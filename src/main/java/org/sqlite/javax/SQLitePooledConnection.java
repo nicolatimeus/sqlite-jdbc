@@ -65,6 +65,7 @@ public class SQLitePooledConnection extends JDBC4PooledConnection {
     public SQLiteConnection getPhysicalConn() {
         return physicalConn;
     }
+
     /** @see javax.sql.PooledConnection#close() */
     public void close() throws SQLException {
         if (handleConn != null) {
@@ -91,13 +92,25 @@ public class SQLitePooledConnection extends JDBC4PooledConnection {
                                 getClass().getClassLoader(),
                                 new Class[] {Connection.class},
                                 new InvocationHandler() {
-                                    boolean isClosed;
+                                    volatile boolean isClosed;
 
                                     public Object invoke(Object proxy, Method method, Object[] args)
                                             throws Throwable {
                                         try {
                                             String name = method.getName();
                                             if ("close".equals(name)) {
+
+                                                if (isClosed) {
+                                                    return null;
+                                                }
+
+                                                if (!physicalConn.getAutoCommit()) {
+                                                    physicalConn.rollback();
+                                                }
+                                                physicalConn.setAutoCommit(true);
+
+                                                isClosed = true;
+
                                                 ConnectionEvent event =
                                                         new ConnectionEvent(
                                                                 SQLitePooledConnection.this);
@@ -105,12 +118,6 @@ public class SQLitePooledConnection extends JDBC4PooledConnection {
                                                 for (int i = listeners.size() - 1; i >= 0; i--) {
                                                     listeners.get(i).connectionClosed(event);
                                                 }
-
-                                                if (!physicalConn.getAutoCommit()) {
-                                                    physicalConn.rollback();
-                                                }
-                                                physicalConn.setAutoCommit(true);
-                                                isClosed = true;
 
                                                 return null; // don't close physical connection
                                             } else if ("isClosed".equals(name)) {
